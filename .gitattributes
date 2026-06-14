@@ -1,0 +1,4 @@
+*.parquet filter=lfs diff=lfs merge=lfs -text
+*.db filter=lfs diff=lfs merge=lfs -text
+ungdc-explorer/backend/ungdc.db filter=lfs diff=lfs merge=lfs -text
+AP/SysteemProjectDelen/dataverse_files/bertopic_model filter=lfs diff=lfs merge=lfs -text
