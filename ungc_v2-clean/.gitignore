@@ -1,0 +1,9 @@
+.DS_Store
+__MACOSX/
+__pycache__/
+.ipynb_checkpoints/
+data/
+*.ipynb
+*.csv
+*.parquet
+*.json
