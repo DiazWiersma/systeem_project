@@ -1,3 +1,0 @@
-*.db
-*.parquet
-AP/SystemProjectDelen/dataverse_files/
