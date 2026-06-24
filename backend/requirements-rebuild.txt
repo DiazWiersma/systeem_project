@@ -1,0 +1,5 @@
+# One-time topic-evidence rebuild dependencies.
+# The normal website only needs requirements.txt.
+numpy>=1.26
+sentence-transformers>=3.0
+torch>=2.2

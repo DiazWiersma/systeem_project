@@ -32,6 +32,39 @@ BASE_DIR = Path(__file__).parent
 DB_PATH = BASE_DIR / "ungdc.db"
 
 
+# Presentation-only normalisation. The historical source values stay untouched in
+# SQLite, while the API exposes consistent modern names and useful search aliases.
+COUNTRY_NAMES = {
+    "CSK": ("Czechoslovakia", ["Czech and Slovak Federal Republic"]),
+    "DDR": ("East Germany", ["DDR", "German Democratic Republic"]),
+    "COD": ("Democratic Republic of the Congo", ["Dem. Rep. Congo", "DR Congo", "DRC", "Zaire"]),
+    "COG": ("Republic of the Congo", ["Congo", "Rep. Congo", "Congo-Brazzaville"]),
+    "CPV": ("Cape Verde", ["Cabo Verde"]),
+    "CIV": ("Côte d'Ivoire", ["Cote d'Ivoire", "Ivory Coast"]),
+    "CZE": ("Czechia", ["Czech Republic"]),
+    "MKD": ("North Macedonia", ["Macedonia"]),
+    "SWZ": ("Eswatini", ["Swaziland", "eSwatini"]),
+    "TLS": ("Timor-Leste", ["East Timor"]),
+    "YMD": ("South Yemen", ["YMD", "Democratic Yemen", "People's Democratic Republic of Yemen", "Unknown"]),
+    "YUG": ("Yugoslavia", ["Serbia and Montenegro"]),
+}
+HISTORICAL_ISOS = {"CSK", "DDR", "YMD", "YUG"}
+
+
+def display_speaker(value):
+    """Fix known source spelling variants without rewriting the source corpus."""
+    if not isinstance(value, str):
+        return value
+    return re.sub(r"\bErdogan\b", "Erdoğan", value)
+
+
+def normalise_records(records):
+    for record in records:
+        if "speaker" in record:
+            record["speaker"] = display_speaker(record.get("speaker"))
+    return records
+
+
 def get_db():
     return sqlite3.connect(DB_PATH)
 
@@ -41,6 +74,10 @@ def has_table(con, name):
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
     ).fetchone()
     return row is not None
+
+
+def has_column(con, table, column):
+    return any(row[1] == column for row in con.execute(f"PRAGMA table_info({table})"))
 
 
 def topic_join(con, topic, params):
@@ -147,11 +184,27 @@ def get_topic_details():
 
 @app.get("/countries")
 def get_countries():
-    df = pd.read_sql(
-        "SELECT DISTINCT iso, country_clean as country FROM speeches ORDER BY country_clean",
-        get_db()
-    )
-    return df.to_dict(orient="records")
+    con = get_db()
+    try:
+        rows = con.execute(
+            "SELECT iso, MIN(country_clean) FROM speeches "
+            "WHERE iso IS NOT NULL GROUP BY iso ORDER BY MIN(country_clean)"
+        ).fetchall()
+        countries = []
+        for iso, source_name in rows:
+            display_name, aliases = COUNTRY_NAMES.get(iso, (source_name, []))
+            combined_aliases = list(dict.fromkeys(
+                [source_name, *aliases] if source_name != display_name else aliases
+            ))
+            countries.append({
+                "iso": iso,
+                "country": display_name,
+                "aliases": combined_aliases,
+                "historical": iso in HISTORICAL_ISOS,
+            })
+        return sorted(countries, key=lambda item: item["country"])
+    finally:
+        con.close()
 
 
 @app.get("/map")
@@ -245,7 +298,7 @@ def get_speeches(
             sql += " LIMIT ?"
             params.append(int(limit))
         df = pd.read_sql(sql, con, params=params)
-        return df.to_dict(orient="records")
+        return normalise_records(df.to_dict(orient="records"))
     finally:
         con.close()
 
@@ -261,6 +314,7 @@ def get_speech(iso: str, year: int):
         if df.empty:
             return {"error": "Niet gevonden"}
         rec = df.iloc[0].to_dict()
+        rec["speaker"] = display_speaker(rec.get("speaker"))
         if has_table(con, "speech_topics"):
             tdf = pd.read_sql(
                 "SELECT topic, topic_label, rank FROM speech_topics "
@@ -389,13 +443,21 @@ def get_highlights(iso: str, year: int, topic: int = Query(None), q: str = Query
         chunk_mode = (not q) and has_table(con, "chunk_topics_new")
 
         if chunk_mode:
+            evidence_cols = (
+                ", evidence_kind, is_low_confidence"
+                if has_column(con, "chunk_topics_new", "evidence_kind")
+                else ", 'top_k' as evidence_kind, 0 as is_low_confidence"
+            )
             cdf = pd.read_sql(
-                "SELECT chunk_idx, score FROM chunk_topics_new "
-                "WHERE speech_id = ? AND topic_final = ? ORDER BY chunk_idx",
+                "SELECT chunk_idx, score" + evidence_cols + " FROM chunk_topics_new "
+                "WHERE speech_id = ? AND topic_final = ? "
+                "ORDER BY score DESC, chunk_idx",
                 con, params=[speech_id, int(topic_id)])
             chunks = _chunk_text(text)
             matched = set(cdf["chunk_idx"].tolist())
             scores = dict(zip(cdf["chunk_idx"], cdf["score"]))
+            evidence_kinds = dict(zip(cdf["chunk_idx"], cdf["evidence_kind"]))
+            low_confidence = dict(zip(cdf["chunk_idx"], cdf["is_low_confidence"]))
             highlights = []
             for idx, (word_start, chunk_str) in enumerate(chunks):
                 if idx in matched:
@@ -404,10 +466,15 @@ def get_highlights(iso: str, year: int, topic: int = Query(None), q: str = Query
                         "text": chunk_str,
                         "sentence": chunk_str,            # alias
                         "score": round(float(scores[idx]), 4),
+                        "evidence_kind": evidence_kinds[idx],
+                        "is_low_confidence": bool(low_confidence[idx]),
                         "word_start": word_start,
                         "word_end": _chunk_end(word_start, chunk_str),
                         "matched_keywords": [],
                     })
+            highlights.sort(
+                key=lambda item: (-float(item["score"]), int(item["chunk_idx"]))
+            )
             if highlights:
                 return {
                     "iso": iso, "year": year, "topic": int(topic_id), "mode": "chunk",
