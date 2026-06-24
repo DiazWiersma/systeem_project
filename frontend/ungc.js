@@ -327,41 +327,56 @@ function labelKey(){
   return MODE+'|'+r[0].toFixed(2)+'|'+r[1].toFixed(2)+'|'+proj.scale().toFixed(1)+'|'+panY.toFixed(1)+'|'+W+'x'+H;
 }
 function drawLabels(){
-  cx.font='600 11px "Spline Sans",sans-serif';
+  var fontSize=zoomK>=4 ? 11 : 10.5;
+  cx.font='600 '+fontSize+'px "Spline Sans",sans-serif';
   cx.textAlign='center'; cx.textBaseline='middle';
   var key=labelKey();
   if(key!==labelCacheKey){
-    var cands=[];
+    var cands=[], minArea=zoomK>=4?70:(zoomK>=2.5?350:1500);
     for(var i=0;i<WORLD.features.length;i++){
       var f=WORLD.features[i];
       var iso=f.properties.iso; if(!iso) continue;
       var lf=LABEL_FEAT[iso]||f;
-      var a=geoPath.area(lf); if(a<4200) continue;
+      var a=geoPath.area(lf); if(a<minArea && iso!==state.iso && iso!==hoverIso) continue;
       var c=geoPath.centroid(lf); if(!c || isNaN(c[0])) continue;
       var b=geoPath.bounds(lf); if(!isFinite(b[0][0])) continue;
       var tw=cx.measureText(f.properties.name).width;
-      if(tw > (b[1][0]-b[0][0])*0.85) continue;
-      if(13 > (b[1][1]-b[0][1])*0.95) continue;
-      cands.push({iso:iso, name:f.properties.name, a:a, c:c, tw:tw});
+      var priority=(iso===state.iso?1e12:(iso===hoverIso?9e11:a));
+      cands.push({iso:iso, name:f.properties.name, priority:priority, c:c, tw:tw, point:false});
     }
-    cands.sort(function(x,y){ return y.a-x.a; });
+    if(zoomK>=2.6){
+      Object.keys(COUNTRY_POINTS).forEach(function(iso){
+        if(!ISO2NAME[iso]) return;
+        var c=pointScreen(proj,MODE,COUNTRY_POINTS[iso]); if(!c) return;
+        var name=ISO2NAME[iso], tw=cx.measureText(name).width;
+        var priority=(iso===state.iso?1e12:(iso===hoverIso?9e11:5e10));
+        cands.push({iso:iso,name:name,priority:priority,c:c,tw:tw,point:true});
+      });
+    }
+    cands.sort(function(x,y){ return y.priority-x.priority; });
     var placed=[];
-    for(var j=0;j<cands.length && placed.length<40;j++){
-      var k=cands[j], ok=true;
-      for(var m=0;m<placed.length;m++){
-        var p=placed[m];
-        if(Math.abs(p.c[0]-k.c[0]) < (p.tw+k.tw)/2+10 && Math.abs(p.c[1]-k.c[1]) < 14){ ok=false; break; }
+    var maxLabels=zoomK>=4?110:(zoomK>=2.5?75:45);
+    for(var j=0;j<cands.length && placed.length<maxLabels;j++){
+      var k=cands[j];
+      var offsets=k.point ? [[0,-12],[0,12],[k.tw/2+8,0],[-k.tw/2-8,0]] : [[0,0]];
+      for(var oi=0;oi<offsets.length;oi++){
+        var x=k.c[0]+offsets[oi][0], y=k.c[1]+offsets[oi][1], ok=true;
+        if(x-k.tw/2<4 || x+k.tw/2>W-4 || y-fontSize<4 || y+fontSize>H-4) continue;
+        for(var m=0;m<placed.length;m++){
+          var p=placed[m];
+          if(Math.abs(p.x-x) < (p.tw+k.tw)/2+7 && Math.abs(p.y-y) < fontSize+4){ ok=false; break; }
+        }
+        if(ok){ placed.push({iso:k.iso,name:k.name,tw:k.tw,x:x,y:y,point:k.point}); break; }
       }
-      if(ok) placed.push(k);
     }
     labelCacheKey=key; labelCache=placed;
   }
   for(var n=0;n<labelCache.length;n++){
     var L=labelCache[n];
     cx.lineWidth=2.5; cx.strokeStyle='rgba(255,255,255,.8)';
-    cx.strokeText(L.name, L.c[0], L.c[1]);
+    cx.strokeText(L.name, L.x, L.y);
     cx.fillStyle='#3a3f48';
-    cx.fillText(L.name, L.c[0], L.c[1]);
+    cx.fillText(L.name, L.x, L.y);
   }
 }
 
@@ -766,14 +781,12 @@ function renderFrags(boxId, frags, big, emptyState){
     if(big){
       return '<div class="frag2"'+refAttr+' onclick="event.stopPropagation();openReader('+(+f.year)+', this.dataset.ref)" title="Read the full speech">'
         + '<div class="qmeta"><span>'+m1+'</span><span>'+m2+'</span></div>'
-        + (f.method?'<div class="evidence-note">'+escapeHtml(f.method)+'</div>':'')
         + '<div class="q">'+f.html+'</div>'
         + '<div class="openspeech">Read full speech \u2192</div>'
         + '</div>';
     }
     return '<div class="frag" title="Expand for the full speech">'
       + '<div class="qmeta"><span>'+m1+'</span><span>'+m2+'</span></div>'
-      + (f.method?'<div class="evidence-note">'+escapeHtml(f.method)+'</div>':'')
       + '<div class="q">'+f.html+'</div>'
       + '</div>';
   }).join('');
@@ -849,8 +862,7 @@ function buildFragments(iso, tid, speeches, total){
       var kws   = (r.h && r.h.mode === 'keyword' && sent) ? (sent.matched_keywords||[]) : [];
       quote = excerpt(quote, kws, 55);
       var ref = sent ? storeReaderRef(r.h, sent, kws) : '';
-      var method=sent && sent.is_low_confidence ? 'Low-confidence model evidence' : '';
-      return { year:r.s.year, session:r.s.session, speaker:r.s.speaker, html:highlight(quote, kws), ref:ref, method:method };
+      return { year:r.s.year, session:r.s.session, speaker:r.s.speaker, html:highlight(quote, kws), ref:ref };
     });
     renderFrags('dFrags', frags.slice(0,3), false);
     renderFrags('xFrags', frags, true);
@@ -929,11 +941,9 @@ function renderChunkParagraph(p, ref){
 function reasonText(ref){
   if(!ref || ref.mode!=='chunk') return '';
   var topic=(DATA.topicById[String(ref.topic)]||{}).name || state.topic || 'selected topic';
-  var bits=[ref.evidence_kind==='assigned_best' ? 'Best available model evidence for '+topic : 'Chunk selected for '+topic];
-  if(ref.chunk_idx!=null) bits.push('chunk '+(Number(ref.chunk_idx)+1));
-  if(ref.score!=null) bits.push('score '+Number(ref.score).toFixed(2));
-  if(ref.is_low_confidence) bits.push('low confidence');
-  return bits.join(' - ');
+  return ref.evidence_kind==='assigned_best'
+    ? 'Best matching passage for '+topic
+    : 'Model-selected passage for '+topic;
 }
 
 var reader=$('reader');
@@ -1137,17 +1147,19 @@ function saveApi(){
 
 var TOUR_STEPS=[
   { eyebrow:'Welcome', title:'UNGC Explorer',
-    text:'Explore nearly 80 years of UN General Debate speeches (1946\u20132025). Every country on the map is coloured by how often it matches the selected topic or keyword.' },
-  { eyebrow:'Step 1', title:'Pick a search and period',
-    text:'Open Filters to search by topic, by words in the speech text, or by both together. When text is entered, choose whether it searches all topics or only the selected topic. The active mode is always shown above the filters and in the map legend.' },
-  { eyebrow:'Step 2', title:'Read the map',
-    text:'Deeper blue means a country matched the selected search more often. The panel at the bottom left explains the colours and describes the active topic or keyword.' },
-  { eyebrow:'Step 3', title:'Find every delegation',
-    text:'Countries too small for a clear map shape are shown as clickable dots. Former states such as Czechoslovakia and Yugoslavia remain searchable and carry a Historical delegation label, but are not placed on the modern map.' },
-  { eyebrow:'Step 4', title:'What counts as a country?',
-    text:'This explorer follows delegations with their own UN General Debate speech series. Territories without a separate series, such as Cura\u00e7ao, are therefore not listed as separate countries.' },
-  { eyebrow:'Step 5', title:'Dive into the speeches',
-    text:'Use the search bar at the top or click a country: the map zooms in and shows its numbers and key passages. Expand the card to adjust filters for that country and to read full speeches.' }
+    text:'Explore UN General Debate speeches from 1946 to 2025. The map helps you compare which delegations discussed a topic or used particular words, and lets you open the supporting speeches.' },
+  { eyebrow:'Step 1 of 6', title:'Choose how to search',
+    text:'Topic only uses one of the predefined themes. Text only searches for your words across every speech and pauses the topic. Combined requires both the selected topic and your text. The active mode is repeated in the filters and map legend.' },
+  { eyebrow:'Step 2 of 6', title:'Choose a period',
+    text:'Use the year range or quick buttons to focus the results. All map colours, counts and country statistics follow the active search and period. If nothing matches, a popup explains this and takes you directly back to the filters.' },
+  { eyebrow:'Step 3 of 6', title:'Read the map',
+    text:'Grey means no matching speeches. Blue means at least one match, and deeper blue means more matches. Hover for an exact count, zoom to reveal more country names, and switch between the globe and flat map whenever useful.' },
+  { eyebrow:'Step 4 of 6', title:'Find every delegation',
+    text:'Small countries are represented by clickable dots and are also searchable by name or alias. Historical delegations such as Yugoslavia are searchable but are not placed on the modern map. Territories without their own General Debate speech series, such as Cura\u00e7ao, are not separate results.' },
+  { eyebrow:'Step 5 of 6', title:'Understand a country',
+    text:'Select a country through the map or search bar. Its card shows matching speeches, the matching share of that country\u2019s speeches, and its total speeches in the selected period. Expand the card to refine the same search for that country.' },
+  { eyebrow:'Step 6 of 6', title:'Read the evidence',
+    text:'Relevant fragments show the best matching model-selected passage from each speech. Open a fragment to read the full speech with that passage highlighted. These passages help exploration; always use the complete speech when interpreting political context.' }
 ];
 var tourStep=0;
 function startTour(){ tourStep=0; renderTour(); $('tour').classList.remove('hidden'); clearHover(); }
@@ -1165,12 +1177,9 @@ function nextTour(){
 }
 function endTour(){
   $('tour').classList.add('hidden');
-  try{ localStorage.setItem('ungc_tour_v2','1'); }catch(err){  }
 }
 function maybeStartTour(){
-  var seen=false;
-  try{ seen=!!localStorage.getItem('ungc_tour_v2'); }catch(err){ seen=false; }
-  if(!seen) startTour();
+  startTour();
 }
 
 document.addEventListener('keydown', function(e){
@@ -1190,4 +1199,4 @@ renderTopicList();
 resize();
 updateViewButtons();
 pingApi();
-maybeStartTour();
+window.addEventListener('load', maybeStartTour, {once:true});
