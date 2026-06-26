@@ -47,9 +47,26 @@ Maak een virtuele Python-omgeving aan en installeer de benodigde packages.
 Windows PowerShell:
 
 ```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+```
+
+Als `python` niet wordt herkend, probeer dan:
+
+```powershell
 py -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+```
+
+Als Python via Anaconda/Miniconda wordt gebruikt:
+
+```powershell
+conda create -n ungc-explorer python=3.11 -y
+conda activate ungc-explorer
+python -m pip install --upgrade pip
+python -m pip install -r backend\requirements.txt
 ```
 
 macOS/Linux:
@@ -67,6 +84,13 @@ Windows PowerShell:
 
 ```powershell
 .\.venv\Scripts\python.exe run.py
+```
+
+Met de conda-omgeving:
+
+```powershell
+conda activate ungc-explorer
+python run.py
 ```
 
 Of dubbelklik op:
@@ -108,7 +132,7 @@ start.bat                  Windows-startbestand
 
 ## Problemen oplossen
 
-Als `python` of `py` niet wordt herkend, installeer Python via https://www.python.org/downloads/ en vink tijdens installatie "Add Python to PATH" aan.
+Als `python` of `py` niet wordt herkend, installeer Python via https://www.python.org/downloads/ en vink tijdens installatie "Add Python to PATH" aan. Met Anaconda/Miniconda kan ook de conda-installatie hierboven worden gebruikt.
 
 Als dependencies ontbreken:
 
