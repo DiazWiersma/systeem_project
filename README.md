@@ -104,8 +104,6 @@ frontend/
 
 run.py                     Start backend en serveert de frontend
 start.bat                  Windows-startbestand
-DATA_PROVENANCE.md         Herkomst en verwerking van de data
-TOPIC_REBUILD.md           Instructies voor het opnieuw opbouwen van topic-evidence
 ```
 
 ## Problemen oplossen
