@@ -1,8 +1,11 @@
 @echo off
-REM Dubbelklik dit bestand om alles te starten (Windows).
 cd /d "%~dp0"
 
 set "PYTHON_EXE="
+
+if exist ".venv\Scripts\python.exe" set "PYTHON_EXE=.venv\Scripts\python.exe"
+
+if defined PYTHON_EXE goto run
 
 where python >nul 2>nul
 if not errorlevel 1 set "PYTHON_EXE=python"
@@ -13,15 +16,11 @@ if not defined PYTHON_EXE (
 )
 
 if not defined PYTHON_EXE (
-  set "CODEX_PYTHON=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
-  if exist "%CODEX_PYTHON%" set "PYTHON_EXE=%CODEX_PYTHON%"
-)
-
-if not defined PYTHON_EXE (
   echo Python is niet gevonden. Installeer Python 3 en start dit bestand opnieuw.
   pause
   exit /b 1
 )
 
+:run
 "%PYTHON_EXE%" run.py
 pause

@@ -1,16 +1,3 @@
-# main.py - UNGC Explorer backend (FastAPI + SQLite)
-# Alle endpoints van de vorige versie blijven werken; daarnaast:
-#   /map           choropleth-aggregatie per land (veel sneller dan client-side tellen)
-#   /speeches      ondersteunt nu ook q= (vrij zoekwoord in de speechtekst) en geeft per
-#                  speech een lijst met topics terug (meerdere topics per speech mogelijk)
-#   /keyword-map   choropleth op basis van een vrij zoekwoord
-#   /timeline      ondersteunt nu ook iso= voor de piekjaren per land
-#   /status        kleine healthcheck voor de statusknop in de frontend
-#
-# Topicfilters lopen via de tabel speech_topics (een rij per speech-topickoppeling,
-# meerdere topics per speech mogelijk). Dat is veel sneller dan filteren op de
-# speeches-tabel zelf, omdat die de volledige teksten bevat. Ontbreekt de tabel
-# (oudere database), dan valt alles terug op de kolom topic_final.
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,10 +17,6 @@ app.add_middleware(
 
 BASE_DIR = Path(__file__).parent
 DB_PATH = BASE_DIR / "ungdc.db"
-
-
-# Presentation-only normalisation. The historical source values stay untouched in
-# SQLite, while the API exposes consistent modern names and useful search aliases.
 COUNTRY_NAMES = {
     "CSK": ("Czechoslovakia", ["Czech and Slovak Federal Republic"]),
     "DDR": ("East Germany", ["DDR", "German Democratic Republic"]),
@@ -52,7 +35,6 @@ HISTORICAL_ISOS = {"CSK", "DDR", "YMD", "YUG"}
 
 
 def display_speaker(value):
-    """Fix known source spelling variants without rewriting the source corpus."""
     if not isinstance(value, str):
         return value
     return re.sub(r"\bErdogan\b", "Erdoğan", value)
@@ -81,8 +63,6 @@ def has_column(con, table, column):
 
 
 def topic_join(con, topic, params):
-    """JOIN-clausule die speeches beperkt tot een topic. Met speech_topics
-    tellen alle topics van een speech mee; anders alleen topic_final."""
     if topic is None:
         return ""
     if has_table(con, "speech_topics"):
@@ -93,7 +73,6 @@ def topic_join(con, topic, params):
 
 
 def topic_where(con, topic, params):
-    """WHERE-toevoeging voor de terugvaloptie zonder speech_topics."""
     if topic is None or has_table(con, "speech_topics"):
         return ""
     params.append(int(topic))
@@ -101,7 +80,6 @@ def topic_where(con, topic, params):
 
 
 def q_where(q, params):
-    """Vrij zoekwoord in de speechtekst; meerdere woorden = alle woorden moeten voorkomen."""
     sql = ""
     if not q:
         return sql
@@ -137,9 +115,6 @@ def get_status():
 
 @app.get("/topics")
 def get_topics():
-    # Leest uit de (door build_db.py consistent opgebouwde) topics-tabel, zodat de
-    # tellingen exact overeenkomen met /map, /timeline en /country-topics.
-    # count = aantal speeches dat het topic aanraakt (multi-topic).
     con = get_db()
     try:
         df = pd.read_sql("""
@@ -157,13 +132,9 @@ def get_topics():
 
 @app.get("/topics/details")
 def get_topic_details():
-    """Volledige topicinfo (label, omschrijving, keywords, count) uit de
-    database. Hiermee haalt de frontend de filterlijst en de legenda-tekst
-    live op, i.p.v. uit een grote ingebedde CSV."""
     con = get_db()
     try:
         if not has_table(con, "topic_meta"):
-            # terugval: alleen label + count uit topics
             df = pd.read_sql(
                 "SELECT topic, topic_label as clean_name, '' as description, "
                 "'' as keywords, count FROM topics ORDER BY count DESC", con)
@@ -214,12 +185,9 @@ def get_map(
     year_to: int = Query(None),
     q: str = Query(None),
 ):
-    """Aantal matchende speeches per land, voor de choropleth."""
     con = get_db()
     try:
         params = []
-        # Snelste route: topicfilter zonder zoekwoord kan volledig op
-        # speech_topics draaien en raakt de zware tekstkolom niet aan.
         if topic is not None and not q and has_table(con, "speech_topics"):
             sql = "SELECT iso, COUNT(*) as count FROM speech_topics WHERE topic = ?"
             params.append(int(topic))
@@ -257,7 +225,6 @@ def get_keyword_map(
     year_from: int = Query(None),
     year_to: int = Query(None),
 ):
-    """Choropleth op vrij zoekwoord (zonder topicfilter)."""
     return get_map(topic=None, year_from=year_from, year_to=year_to, q=q)
 
 
@@ -329,8 +296,6 @@ def get_speech(iso: str, year: int):
 
 @app.get("/timeline")
 def get_timeline(topic: int = Query(None), iso: str = Query(None)):
-    """Aantal speeches per jaar. Zonder iso: wereldwijd (zoals voorheen).
-    Met iso: alleen voor dat land, voor de piekperiode per land."""
     con = get_db()
     try:
         if iso:
@@ -378,8 +343,6 @@ def get_country_topics(iso: str):
 
 
 def _chunk_text(text, words_per_chunk=150, overlap=30):
-    """Identiek aan de chunking in build_db.py / better_topics.ipynb. Geeft per
-    chunk de woord-startindex en de tekst terug."""
     words = str(text).split()
     chunks, start = [], 0
     while start < len(words):
@@ -396,37 +359,27 @@ def _chunk_end(word_start, text):
 
 
 def _topic_keywords(con, topic_id):
-    """Keywords van een topic voor de gele markering. Eerst de echte keywords
-    uit topic_meta (door build_db.py opgeslagen); anders afgeleid uit het label
-    (ruw BERTopic-label of schoon label)."""
     if has_table(con, "topic_meta"):
         row = con.execute("SELECT keywords FROM topic_meta WHERE topic = ?",
                           (int(topic_id),)).fetchone()
         if row and row[0]:
             kws = [k.strip() for k in str(row[0]).split(",") if len(k.strip()) > 2]
             if kws:
-                return list(dict.fromkeys(kws))      # uniek, volgorde behouden
+                return list(dict.fromkeys(kws))
     row = con.execute("SELECT topic_label FROM topics WHERE topic = ?",
-                       (int(topic_id),)).fetchone()
+                      (int(topic_id),)).fetchone()
     if not row:
         return []
     label = row[0] or ""
-    if "_" in label:                       # ruw label: "0_climate_change_..."
+    if "_" in label:
         parts = label.split("_")[1:]
-    else:                                  # schoon label: "Climate Change & ..."
-        parts = re.split(r"[\s&/,–-]+", label)
+    else:
+        parts = re.split(r"[\s&/,\-]+", label)
     return list({p.strip() for p in parts if len(p.strip()) > 2})
 
 
 @app.get("/speech/{iso}/{year}/highlights")
 def get_highlights(iso: str, year: int, topic: int = Query(None), q: str = Query(None)):
-    """Gemarkeerde passages in een speech.
-      - chunk_topics_new aanwezig  -> chunk-gebaseerd: geeft de chunks terug die
-        het model aan dit topic koppelde, met score.
-      - anders                     -> zin-gebaseerde terugval op keywordmatch.
-      - q (vrij zoekwoord)         -> altijd zin-gebaseerd op de zoektermen.
-    Elke highlight bevat altijd 'text' (+ 'sentence' als alias), zodat de
-    frontend met beide vormen overweg kan."""
     con = get_db()
     try:
         df = pd.read_sql(
@@ -464,8 +417,7 @@ def get_highlights(iso: str, year: int, topic: int = Query(None), q: str = Query
                     highlights.append({
                         "chunk_idx": idx,
                         "text": chunk_str,
-                        "sentence": chunk_str,            # alias
-                        "score": round(float(scores[idx]), 4),
+                        "sentence": chunk_str,"score": round(float(scores[idx]), 4),
                         "evidence_kind": evidence_kinds[idx],
                         "is_low_confidence": bool(low_confidence[idx]),
                         "word_start": word_start,
@@ -481,8 +433,7 @@ def get_highlights(iso: str, year: int, topic: int = Query(None), q: str = Query
                     "keywords": [],
                     "total_chunks": len(chunks),
                     "highlighted_chunks": len(highlights),
-                    "total_sentences": len(chunks),           # voor compat
-                    "highlighted_sentences": len(highlights),
+                    "total_sentences": len(chunks),"highlighted_sentences": len(highlights),
                     "highlights": highlights,
                 }
             fallback = chunks[0] if chunks else (0, str(text))
@@ -503,8 +454,6 @@ def get_highlights(iso: str, year: int, topic: int = Query(None), q: str = Query
                     "matched_keywords": [],
                 }],
             }
-
-        # --- terugval / vrij zoekwoord: zin-gebaseerd -------------------------
         if q:
             keywords = [t.strip() for t in q.split() if len(t.strip()) > 1]
         else:

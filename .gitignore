@@ -1,5 +1,8 @@
 # One-time local topic rebuild artifacts
 backend/.venv-rebuild/
+.venv/
+.python-packages/
+.python-web-packages/
 backend/ungdc_rebuilt.db
 backend/ungdc_before_rebuild.db
 backend/ungdc_rebuilt_failed.db
@@ -7,3 +10,4 @@ backend/ungdc_rebuilt_failed.db
 # Python caches
 __pycache__/
 *.py[cod]
+.DS_Store

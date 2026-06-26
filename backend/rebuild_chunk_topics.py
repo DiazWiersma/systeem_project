@@ -1,15 +1,3 @@
-"""Rebuild chunk-level topic evidence without changing the site's classifications.
-
-The current database remains untouched. A complete SQLite copy is written to
-``--output`` and only its ``chunk_topics_new`` table is replaced.
-
-Every 150-word chunk stores its top-k semantic topic matches. In addition, every
-topic already assigned to a speech in ``speech_topics`` is guaranteed to have a
-best-evidence chunk, even when that topic is not among any chunk's top-k topics.
-This keeps all existing map counts and filters stable while making every displayed
-speech highlightable and retaining honest confidence scores.
-"""
-
 from __future__ import annotations
 
 import argparse

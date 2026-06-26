@@ -2,8 +2,6 @@ var WORLD = {"type":"FeatureCollection","features":[{"type":"Feature","propertie
 
 var state = { topicId:null, topic:'Topic', from:1946, to:2025, iso:null, name:null, q:'', textScope:'all' };
 
-// Countries that are too small for the simplified polygon map are rendered as
-// clickable point markers. Coordinates are representative country centres.
 var COUNTRY_POINTS = {
   AND:[1.60,42.55], ATG:[-61.80,17.08], BHR:[50.55,26.07], BRB:[-59.55,13.17],
   CPV:[-23.60,15.10], COM:[43.33,-11.70], DMA:[-61.37,15.42], GRD:[-61.68,12.12],
